@@ -1,0 +1,16 @@
+{
+  "name": "echo-arena-cocos388",
+  "version": "1.0.0",
+  "description": "回声猎场 – 75秒每日公平挑战 / Cocos Creator 3.8.8",
+  "private": true,
+  "creator": {
+    "version": "3.8.8"
+  },
+  "scripts": {
+    "test": "tsc -p tsconfig.test.json && node --test tests/*.test.cjs",
+    "validate": "node tools/validate.cjs",
+    "bootstrap": "node tools/generate-assets.cjs",
+    "postbuild": "node tools/postbuild.cjs",
+    "check": "npm test && npm run validate"
+  }
+}

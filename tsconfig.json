@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.cocos.json","compilerOptions":{"target":"ES2019","module":"ESNext","moduleResolution":"Node","lib":["ES2019","DOM"],"strict":true,"skipLibCheck":true,"experimentalDecorators":true,"useDefineForClassFields":false,"types":[]},"include":["assets/**/*.ts"]}

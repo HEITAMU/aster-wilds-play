@@ -1,0 +1,10 @@
+# Cocos-generated caches
+library/
+temp/
+local/
+profiles/
+build/
+node_modules/
+dist-test/
+*.log
+.DS_Store
