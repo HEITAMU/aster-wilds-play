@@ -1,0 +1,14 @@
+{
+  "name": "crown-thief-wechat-game",
+  "version": "0.1.0",
+  "private": true,
+  "uuid": "ba4c9abe-8f69-48f6-9cf7-09766e040025",
+  "creator": {
+    "version": "3.8.8"
+  },
+  "scripts": {
+    "test:rules": "node --experimental-strip-types tests/rules.test.mjs",
+    "check": "node tools/verify.mjs && npm run test:rules"
+  },
+  "type": "module"
+}

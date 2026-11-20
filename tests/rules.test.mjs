@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import {
+  generateWaves,CrownRules,dailyKey,dailySeed,dateBeijing,hashSeed,parseChallenge,bestTitle,ROUND_SECONDS
+} from '../assets/scripts/Rules.ts';
+const seed=hashSeed('validation-seed');
+const a=generateWaves(seed),b=generateWaves(seed);
+assert.deepEqual(a,b,'the same seed must produce the same course');
+assert.notDeepEqual(a,generateWaves(seed+1),'different courses must vary');
+assert(a.length>35 && a.length<80, 'sustained varied run');
+assert(a.every(w=>w.lane>=0&&w.lane<=2&&w.speed>0),'valid lane & velocity');
+assert(a.every(w=>w.at<ROUND_SECONDS),'spawns before finish');
+assert.equal(dateBeijing(Date.UTC(2026,10,20,15,59,0)),'2026-11-20');
+assert.equal(dateBeijing(Date.UTC(2026,10,20,16,0,0)),'2026-11-21');
+assert.equal(dailyKey('2026-11-20'),'ct_daily_20261120');
+assert.equal(dailySeed('2026-11-20'),dailySeed('2026-11-20'));
+const g=new CrownRules(seed),w=a.find(x=>x.kind==='duel');
+assert(w);
+const p=g.successfulParry(w,true);assert(p>=370);assert.equal(g.perfect,1);
+assert.equal(g.banked,0);assert.equal(g.loose,p);
+assert.equal(g.hit(),Math.ceil(p*.62));assert.equal(g.combo,0);
+const rest=g.loose;assert(g.bank()===rest);assert.equal(g.loose,0);
+assert.equal(g.bank(),0,'cooldown stops repeated banking');
+g.tick(3.5);assert.equal(g.bankCooldown,0);
+g.pickup();const pending=g.loose;g.tick(100);
+assert(g.finished);assert.equal(g.banked,rest+Math.floor(pending*.7));
+const frozen=g.banked;g.tick(100);g.finish();assert.equal(g.banked,frozen,'end cannot double bank');
+assert.equal(parseChallenge({mode:'challenge',seed:'42',target:'3000',date:'2026-11-20'}).seed,42);
+assert.equal(parseChallenge({mode:'challenge',seed:'oops',target:'5000',date:'2026-11-20'}),null);
+assert.equal(parseChallenge({mode:'challenge',seed:'42',target:'10000000000',date:'2026-11-20'}),null);
+assert.equal(bestTitle(22100),'不朽冕主');
+console.log('PASS: 20 deterministic timeline, score, risk, leaderboard and share-contract assertions');
