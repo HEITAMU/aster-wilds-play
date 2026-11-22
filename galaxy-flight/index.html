@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh-CN" data-release="0.1.2">
+<html lang="zh-CN" data-release="0.1.3">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no,maximum-scale=1">
   <meta name="theme-color" content="#030917">
-  <title>飞吧银河系！· v0.1.2 流畅修复版</title>
+  <title>飞吧银河系！· v0.1.3 触控修复版</title>
   <style>
     *{box-sizing:border-box} html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#030815;color:#fff;font-family:system-ui,-apple-system,Arial,sans-serif}
     #shell{position:relative;height:100%;height:100dvh;width:100%;display:flex;justify-content:center;align-items:center}
@@ -23,7 +23,7 @@
   </style>
 </head>
 <body>
-<div id="shell"><canvas id="game" aria-label="飞吧银河系游戏，点击并按住吸引，松手弹射"></canvas><div id="boot" aria-live="polite"><div class="title">飞吧银河系！</div><div class="sub">按住绕星蓄能 · 松手飞向下一颗星球<br>正在准备飞行画面…</div><div class="hint">若画面停在这里，说明当前文件预览器禁止脚本运行。<br>请用 Safari 浏览器打开此文件。</div></div><button id="mute" aria-label="切换声音">♫</button><span id="foot">BROWSER PLAYTEST · SAME FLIGHT CORE</span></div>
+<div id="shell"><canvas id="game" aria-label="飞吧银河系游戏，点击并按住吸引，松手弹射"></canvas><div id="boot" aria-live="polite"><div class="title">飞吧银河系！</div><div class="sub">轻点推进飞行 · 按住蓄力 · 松手弹射<br>正在准备飞行画面…</div><div class="hint">若画面停在这里，说明当前文件预览器禁止脚本运行。<br>请用 Safari 浏览器打开此文件。</div></div><button id="mute" aria-label="切换声音">♫</button><span id="foot">BROWSER PLAYTEST · SAME FLIGHT CORE</span></div>
 <script>
 window.addEventListener('error',function(ev){ const boot=document.getElementById('boot'); if(boot && !document.documentElement.classList.contains('ready')){document.documentElement.classList.add('error'); boot.querySelector('.sub').textContent='无法启动游戏'; boot.querySelector('.hint').textContent=String(ev.message||'脚本被预览器限制').slice(0,180); } });
 /* Static art and audio now stream as independent files; no huge base64 payload on the JS thread. */
@@ -178,14 +178,47 @@ class FlightCore {
         }
         return target;
     }
+    /** Every contact in flight now has an immediate action, even between stars. */
+    nextAhead() {
+        let selected = null;
+        let best = Infinity;
+        for (const p of this.planets) {
+            if (p.used)
+                continue;
+            const dy = p.y - this.pilot.y;
+            if (dy < -140 || dy > 1400)
+                continue;
+            const priority = Math.abs(dy) + Math.abs(p.x - this.pilot.x) * 0.25 + (dy < 0 ? 360 : 0);
+            if (priority < best) {
+                best = priority;
+                selected = p;
+            }
+        }
+        return selected;
+    }
+    pushTowardNext() {
+        const target = this.nextAhead();
+        const dy = target ? Math.max(0, target.y - this.pilot.y) : 500;
+        const upward = clamp(350 + dy * 0.55, 525, 745);
+        this.pilot.vy = Math.max(this.pilot.vy, upward);
+        if (target) {
+            const vx = clamp((target.x - this.pilot.x) * 1.10, -350, 350);
+            this.pilot.vx = lerp(this.pilot.vx, vx, 0.60);
+        }
+        // Rapid taps should not expire in midair before the next gravitational catch.
+        this.airSeconds = Math.min(this.airSeconds, 1.05);
+        this.emit('boost', this.pilot.x, this.pilot.y);
+    }
     press() {
         if (this.phase !== 'playing')
             return;
         this.held = true;
         if (this.motion === 'flight') {
-            const p = this.targetInReach();
-            if (p)
-                this.capture(p);
+            const target = this.targetInReach();
+            if (target)
+                this.capture(target);
+            else
+                this.pushTowardNext();
         }
     }
     capture(p) {
@@ -236,7 +269,14 @@ class FlightCore {
         const baseSpeed = grade === 'perfect' ? 770 : grade === 'good' ? 650 : 490;
         const impulse = baseSpeed * mult;
         this.pilot.vx = tx * impulse * (grade === 'rough' ? 0.73 : 0.8);
-        this.pilot.vy = grade === 'rough' ? Math.max(165, ty * impulse * 0.72 + 135) : Math.max(270, ty * impulse + 120);
+        this.pilot.vy = grade === 'rough' ? Math.max(540, ty * impulse * 0.72 + 135) : Math.max(430, ty * impulse + 120);
+        // Quick taps must still travel to the next star instead of dying after one launch.
+        // Holding for the bright arc remains the way to earn PERFECT and the highest speed.
+        if (grade === 'rough') {
+            const next = this.nextAhead();
+            if (next)
+                this.pilot.vx = lerp(this.pilot.vx, clamp((next.x - this.pilot.x) * 1.15, -340, 340), 0.70);
+        }
         // A fast release is still steerable on a narrow portrait phone.
         if (this.pilot.x > 210 && this.pilot.vx > 0)
             this.pilot.vx *= 0.40;
@@ -301,7 +341,7 @@ class FlightCore {
                 this.pilot.vx = -Math.sin(this.orbitAngle) * this.orbitRadius * this.orbitOmega;
                 this.pilot.vy = Math.cos(this.orbitAngle) * this.orbitRadius * this.orbitOmega;
                 if (this.orbitSeconds > 4.0)
-                    this.release(); // overheat, no infinite stall
+                    this.end(); // missed the launch window; no auto-play loop
             }
         }
         else {
@@ -310,7 +350,12 @@ class FlightCore {
             this.pilot.y += this.pilot.vy * dt;
             this.pilot.vx *= Math.exp(-0.38 * dt);
             this.pilot.vy -= (this.airSeconds > 1.0 ? 115 : 20) * dt;
-            if (this.held) {
+            // A nearby star captures the pilot automatically. Touch is never ignored
+            // merely because the user released the screen while travelling.
+            const nearby = this.targetInReach();
+            if (nearby)
+                this.capture(nearby);
+            if (this.motion === 'flight' && this.held) {
                 const target = this.targetInReach();
                 if (target)
                     this.capture(target);
@@ -391,7 +436,6 @@ class FlightCore {
         return all;
     }
 }
-
 // This browser harness shares the EXACT FlightCore.ts rules with Cocos Creator.
 // Rendering differs intentionally: Creator uses cc.Sprite, cc.Graphics, cc.Label.
 const RESOURCE_BASE = './assets/';
@@ -464,37 +508,69 @@ soundButton.addEventListener('click',e=>{
  if(!audioInitDone)initAudio();
  if(muted){if(audios.bgm)audios.bgm.pause()}else{musicUnlocked=true;music()}
 });
+// Safari and embedded iOS browsers can lose pointerup/capture. Listen to touch
+// events as well, deduplicate the same gesture and recover after cancellation.
+let physicalDownAt=0;
+let touchIdentifier=null;
+let inputPressCount=0;
+let inputReleaseCount=0;
 function press(){
  if(isPointerDown)return;
  isPointerDown=true;
+ physicalDownAt=performance.now();
+ inputPressCount++;
  if(core.phase!=='playing'){
   core.start();fx=[];trail=[];flash='';
   firstPressAt=performance.now();
-  // Audio is prepared AFTER the first second of gameplay, never in the initial hold.
   if(!audioInitDone)setTimeout(initAudio,1550);
  }
- // Critical path must be ONLY simulation and input; no audio initialization.
  core.press();consume();
- // If title-screen media finished loading, start it on a later interaction,
- // never on the first gesture that begins the game.
  if(core.runtime>1.1 && audioInitDone){musicUnlocked=true;music()}
 }
 function release(){
  if(!isPointerDown)return;
- isPointerDown=false;core.release();consume();
+ isPointerDown=false;
+ touchIdentifier=null;
+ inputReleaseCount++;
+ core.release();consume();
  if(core.runtime>1.1 && audioInitDone){musicUnlocked=true;music()}
 }
-canvas.addEventListener('pointerdown',e=>{e.preventDefault();try{canvas.setPointerCapture(e.pointerId)}catch(_){}press()});
-canvas.addEventListener('pointerup',e=>{e.preventDefault();release()});
-canvas.addEventListener('pointercancel',release);
+function pointerStart(e){
+ e.preventDefault();
+ // A stale press must not block every subsequent tap.
+ if(isPointerDown && (touchIdentifier===null || performance.now()-physicalDownAt>1250))release();
+ if(!isPointerDown){
+  try{canvas.setPointerCapture(e.pointerId)}catch(_){}
+  press();
+ }
+}
+canvas.addEventListener('pointerdown',pointerStart);
+window.addEventListener('pointerup',e=>{if(e.pointerType!=='touch'||touchIdentifier===null)release()});
+window.addEventListener('pointercancel',release);
+canvas.addEventListener('lostpointercapture',e=>{if(e.pointerType!=='touch')release()});
+// Always register touch events, even when PointerEvent exists (iOS Safari).
+canvas.addEventListener('touchstart',e=>{
+ e.preventDefault();
+ if(!e.changedTouches.length)return;
+ if(isPointerDown && touchIdentifier!==null && !Array.from(e.touches).some(t=>t.identifier===touchIdentifier))release();
+ if(isPointerDown && performance.now()-physicalDownAt>1250)release();
+ if(!isPointerDown){touchIdentifier=e.changedTouches[0].identifier;press()}
+ else if(touchIdentifier===null)touchIdentifier=e.changedTouches[0].identifier;
+},{passive:false});
+window.addEventListener('touchend',e=>{
+ if(!isPointerDown)return;
+ if(touchIdentifier!==null){
+  for(const t of e.changedTouches){if(t.identifier===touchIdentifier){release();break}}
+ } else if(e.touches.length===0)release();
+},{passive:false});
+window.addEventListener('touchcancel',release,{passive:false});
+// Older browsers without PointerEvent still accept mouse clicks.
 if(!('PointerEvent' in window)){
- canvas.addEventListener('touchstart',e=>{e.preventDefault();press()},{passive:false});
- canvas.addEventListener('touchend',e=>{e.preventDefault();release()},{passive:false});
- canvas.addEventListener('touchcancel',release);
  canvas.addEventListener('mousedown',e=>{e.preventDefault();press()});
  window.addEventListener('mouseup',release);
 }
-window.addEventListener('pointerup',release);
+window.addEventListener('blur',release);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)release()});
 window.addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();press()}});
 window.addEventListener('keyup',e=>{if(e.code==='Space'){e.preventDefault();release()}});
 
@@ -509,7 +585,8 @@ function explode(ev,count=15,hue=0){
 }
 function consume(){
  for(const ev of core.takeEvents()){
-  if(ev.type==='capture'){play('capture',.75);explode(ev,13)}
+  if(ev.type==='boost'){explode(ev,10);flash='引力推进';flashUntil=clock+.28;}
+  else if(ev.type==='capture'){play('capture',.75);explode(ev,13)}
   else if(ev.type==='launch'){
    play('launch');explode(ev,ev.grade==='perfect'?23:16,1);
    flash=ev.grade==='perfect'?'PERFECT!':ev.grade==='good'?'NICE!':'继续飞!';
@@ -611,7 +688,7 @@ function render(){
   if(C.combo>1)txt('连击  × '+C.combo,0,top+265,29,'#ffe2a3');
   if(C.surge>0)txt('银河潮汐  ×2',0,top+316,25,'#d7a0ff');
   if(clock<flashUntil)txt(flash,0,-100,58,flash==='PERFECT!'?'#fff2b2':'#8eebf9','center',800,true);
-  const prompt=C.motion==='orbit'?(C.perfectWindow?'现在松手  ·  PERFECT!':'按住蓄能  ·  等待亮弧'):(C.held?'接近星球，自动捕获引力':'按住屏幕  ·  捕获下一颗星球');
+  const prompt=C.motion==='orbit'?(C.perfectWindow?'现在松手  ·  PERFECT!':'按住蓄能  ·  等待亮弧'):(C.held?'接近星球，自动捕获引力':'轻点推进  ·  接近星球自动捕获');
   txt(prompt,0,vh/2-116,27,C.perfectWindow?'#fff0a2':'#bee8f7');
   txt(C.motion==='orbit'?'精 准 时 机':'按 住 / 松 开',0,vh/2-76,16,'#6b99b9','center',450);
  } else {
@@ -628,7 +705,7 @@ function render(){
   if(C.phase==='title'){
    txt('飞吧银河系！',0,-vh*.28,70,'#fff2d6','center',800,true);
    txt('用一根手指，把速度甩到宇宙尽头。',0,-vh*.28+75,24,'#bce2f0');
-   txt('按住吸引  ·  松手弹射',0,-101,35,'#fff6df');
+   txt('轻点推进  ·  按住蓄力  ·  松手弹射',0,-101,35,'#fff6df');
    txt('进入亮弧时松手，触发 PERFECT 连击',0,-38,22,'#c5e8f9','center',500);
    txt('连续五次精准弹射，释放银河潮汐',0,2,22,'#c5e8f9','center',500);
    txt('触摸屏幕开始',0,buttonY,37,'#ffffff');
@@ -679,7 +756,7 @@ function tick(now){
   shake=Math.max(0,shake-dt);
   render();
   if(!drawnFirstFrame){drawnFirstFrame=true;document.documentElement.classList.add('ready')}
-  if(showPerf){fpsCounter++;if(now-fpsWindowAt>=1000){fpsValue=Math.round(fpsCounter*1000/(now-fpsWindowAt));fpsCounter=0;fpsWindowAt=now}fpsInfo.textContent='FPS '+fpsValue+' / '+core.motion+' / '+Math.round(core.runtime*10)/10+'s'}
+  if(showPerf){fpsCounter++;if(now-fpsWindowAt>=1000){fpsValue=Math.round(fpsCounter*1000/(now-fpsWindowAt));fpsCounter=0;fpsWindowAt=now}fpsInfo.textContent='FPS '+fpsValue+' / '+core.motion+' / '+Math.round(core.runtime*10)/10+'s / DOWN '+inputPressCount+' UP '+inputReleaseCount}
   requestAnimationFrame(tick);
  } catch(err){showFatal(err)}
 }
